@@ -1,9 +1,9 @@
 
-# Scrobbler 🎶
+# Scrobbler
 
-Scrobbler is a tool that repeatedly scrobbles tracks from any album to your OpenScrobbler and Last.fm account, this tool was made for boosting stats or faking play history, all you need is an API key from Last.fm and a valid OpenScrobbler session ID
+**Scrobbler** is a tool that repeatedly scrobbles tracks from any album to your OpenScrobbler and Last.fm account, this tool was made for **boosting stats or faking play history**, all you need is an API key from Last.fm and a valid OpenScrobbler session ID
 
-## Requirements ⚙️
+## Requirements
 
 - Node.js v21.6.1 or higher
 - npm (or another package manager like Yarn or pnpm)
@@ -14,7 +14,7 @@ Scrobbler is a tool that repeatedly scrobbles tracks from any album to your Open
   SESSION_ID=your_openscrobbler_session_id
   ```
 
-### How to get API Key and Session ID 🔑
+### How to get API Key and Session ID
 
 **Last.fm API Key:**
 
@@ -32,13 +32,13 @@ Scrobbler is a tool that repeatedly scrobbles tracks from any album to your Open
 4. Look for the cookie named `PHPSESSID`
 5. Copy the value of `PHPSESSID` and paste it into your `.env` file as `SESSION_ID`
 
-## Installation 📥
+## Installation
 
 1. Clone this repository
 2. Navigate into the directory
 3. Run `npm install` to install dependencies
 
-## Usage 🚀
+## Usage
 
 1. Make sure your `.env` file is correctly set
 2. Run `tsx .`
