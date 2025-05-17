@@ -1,10 +1,10 @@
 import dotenv from 'dotenv';
-dotenv.config();
-
 import { fetch as UndiciFetch } from 'undici';
 import prompts from 'prompts';
 
-const ColorCodes = {
+dotenv.config();
+
+const Colors = {
   Reset: '\x1b[0m',
   Bright: '\x1b[1m',
   Cyan: '\x1b[36m',
@@ -14,24 +14,12 @@ const ColorCodes = {
   White: '\x1b[97m',
 };
 
-const KEY = process.env.API_KEY ?? '';
-const SESSID = process.env.SESSION_ID ?? '';
+const KEY = process.env.API_KEY;
+const SESSID = process.env.SESSION_ID;
 
 if (!KEY || !SESSID) {
-  console.error(`${ColorCodes.Red}[ERROR]:${ColorCodes.White} API_KEY or SESSION_ID not set in .env${ColorCodes.Reset}`);
+  console.error(`${Colors.Red}[ERROR]:${Colors.White} API_KEY or SESSION_ID not set in .env${Colors.Reset}`);
   process.exit(1);
-}
-
-function LogInfo(Message: string) {
-  console.log(`${ColorCodes.Cyan}[INFO]:${ColorCodes.White} ${Message}${ColorCodes.Reset}`);
-}
-
-function LogSuccess(Message: string) {
-  console.log(`${ColorCodes.Green}[SUCCESS]:${ColorCodes.White} ${Message}${ColorCodes.Reset}`);
-}
-
-function LogError(Message: string) {
-  console.error(`${ColorCodes.Red}[ERROR]:${ColorCodes.White} ${Message}${ColorCodes.Reset}`);
 }
 
 interface Track {
@@ -46,31 +34,60 @@ interface AlbumData {
   };
 }
 
-async function Fetch(Artist: string, Album: string): Promise<Track[]> {
-  const Url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${KEY}&artist=${encodeURIComponent(Artist)}&album=${encodeURIComponent(Album)}&format=json`;
-  const Response = await UndiciFetch(Url);
-
-  if (!Response.ok) {
-    throw new Error(`Failed to fetch album info: ${Response.status} ${Response.statusText}`);
-  }
-
-  const Data: AlbumData = await Response.json();
-
-  if (!Data.album?.tracks?.track) {
-    throw new Error('Album or tracks not found');
-  }
-
-  return Array.isArray(Data.album.tracks.track)
-    ? Data.album.tracks.track
-    : [Data.album.tracks.track];
-}
-
 interface ScrobbleResponse {
   scrobbles?: {
     '@attr': {
       accepted: string;
     };
   };
+  error?: number;
+  message?: string;
+}
+
+const Logger = {
+  Info: (Message: string) => {
+    console.log(`${Colors.Cyan}[INFO]:${Colors.White} ${Message}${Colors.Reset}`);
+  },
+  Success: (Message: string) => {
+    console.log(`${Colors.Green}[SUCCESS]:${Colors.White} ${Message}${Colors.Reset}`);
+  },
+  Error: (Message: string) => {
+    console.error(`${Colors.Red}[ERROR]:${Colors.White} ${Message}${Colors.Reset}`);
+  }
+};
+
+function Clean(Title: string): string {
+  return Title.replace(/[\x00-\x1F\x7F]/g, '');
+}
+
+async function Fetch(Artist: string, Album: string): Promise<Track[]> {
+  const CleanAlbum = Clean(Album);
+  const Variants = [
+    encodeURIComponent(CleanAlbum),
+    encodeURIComponent(CleanAlbum.normalize('NFC')),
+    encodeURIComponent(CleanAlbum.normalize('NFKC')),
+    encodeURI(CleanAlbum),
+  ];
+
+  for (const EncodedAlbum of Variants) {
+    const Url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${KEY}&artist=${encodeURIComponent(Artist)}&album=${EncodedAlbum}&format=json`;
+    
+    try {
+      const Response = await UndiciFetch(Url);
+      if (!Response.ok) continue;
+      
+      const Data: AlbumData = await Response.json();
+      const Track = Data.album?.tracks?.track;
+      
+      if (Track) {
+        return Array.isArray(Track) ? Track : [Track];
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  throw new Error('Album or tracks not found');
 }
 
 async function Scrobble(Artist: string, Album: string, Tracks: Track[]): Promise<ScrobbleResponse> {
@@ -102,12 +119,18 @@ async function Scrobble(Artist: string, Album: string, Tracks: Track[]): Promise
     throw new Error(`Scrobble request failed: ${Response.status} ${Response.statusText}`);
   }
 
-  return await Response.json() as ScrobbleResponse;
+  const Json = await Response.json() as ScrobbleResponse;
+
+  if (Json.error === 29 && Json.message?.includes('Rate Limit Exceeded')) {
+    throw new Error('Scrobbling limit hit (24h cooldown)');
+  }
+
+  return Json;
 }
 
 async function Main() {
   try {
-    const Response = await prompts([
+    const { Artist, Album, Repeat } = await prompts([
       { type: 'text', name: 'Artist', message: 'Enter artist name:' },
       { type: 'text', name: 'Album', message: 'Enter album name:' },
       {
@@ -118,55 +141,48 @@ async function Main() {
       },
     ]);
 
-    const { Artist, Album, Repeat } = Response;
-
     if (!Artist || !Album || !Repeat) {
       throw new Error('All inputs are required');
     }
 
-    LogInfo(`Fetching tracks for "${Album}" by ${Artist}`);
+    Logger.Info(`Fetching tracks for "${Album}" by ${Artist}`);
     const Tracks = await Fetch(Artist, Album);
 
-    LogInfo(`Found ${Tracks.length} track(s)`);
+    Logger.Info(`Found ${Tracks.length} track(s)`);
     Tracks.forEach((TrackItem, Index) => {
-      console.log(`${ColorCodes.Yellow}${Index + 1}.${ColorCodes.White} ${TrackItem.name}${ColorCodes.Reset}`);
+      console.log(`${Colors.Yellow}${Index + 1}.${Colors.White} ${TrackItem.name}${Colors.Reset}`);
     });
 
     let Limited = false;
 
-    for (let I = 0; I < Repeat; I++) {
-      if (Limited) break;
-
+    for (let I = 0; I < Repeat && !Limited; I++) {
       try {
-        LogInfo(`Attempting scrobbling #${I + 1}`);
         const Result = await Scrobble(Artist, Album, Tracks);
-
-        if (Result.scrobbles && parseInt(Result.scrobbles['@attr'].accepted, 10) > 0) {
-          LogSuccess(`Attempt #${I + 1} completed`);
+        const Accepted = Result.scrobbles && parseInt(Result.scrobbles['@attr'].accepted, 10) > 0;
+        
+        if (Accepted) {
+          Logger.Success(`Attempt #${I + 1} completed`);
         } else {
-          LogError(`Scrobble #${I + 1} failed: ${JSON.stringify(Result)}`);
+          Logger.Error(`Scrobble #${I + 1} failed: ${JSON.stringify(Result)}`);
         }
       } catch (Err) {
-        const Msg = (Err as Error).message;
-
-        if (Msg.includes('429')) {
-          LogError(`Ratelimit hit at attempt #${I + 1}`);
+        const ErrorMsg = Err instanceof Error ? Err.message : String(Err);
+        
+        if (ErrorMsg.includes('429') || ErrorMsg.includes('Scrobbling limit hit')) {
+          Logger.Error(ErrorMsg.includes('429') ? 
+            `Ratelimit hit at attempt #${I + 1}` : 
+            ErrorMsg);
           Limited = true;
         } else {
-          LogError(`Scrobble #${I + 1} error: ${Msg}`);
+          Logger.Error(`Scrobble #${I + 1} error: ${ErrorMsg}`);
         }
       }
     }
 
-    if (!Limited) {
-      LogSuccess('Scrobbling done');
-    }
+    Logger.Info(Limited ? 'Scrobbling stopped due to ratelimits' : 'Scrobbling done');
+    
   } catch (Err) {
-    if (Err instanceof Error) {
-      LogError(Err.message);
-    } else {
-      LogError('Unknown error occurred (contact @rbxm on Discord)');
-    }
+    Logger.Error(Err instanceof Error ? Err.message : String(Err));
   }
 }
 
