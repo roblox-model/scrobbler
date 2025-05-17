@@ -1,7 +1,7 @@
 
 # Scrobbler
 
-**Scrobbler** is a tool that repeatedly scrobbles tracks from any album to your OpenScrobbler and Last.fm account, this tool was made for **boosting stats or faking play history**, all you need is an API key from Last.fm and a valid OpenScrobbler session ID
+**Scrobbler** is a tool that repeatedly scrobbles tracks from any album to your Last.fm account, this tool was made for **boosting stats or faking play history**, all you need is an API key from Last.fm and a valid OpenScrobbler session ID
 
 ## Requirements
 
