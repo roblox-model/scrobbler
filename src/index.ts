@@ -128,6 +128,10 @@ async function Scrobble(Artist: string, Album: string, Tracks: Track[]): Promise
   return Json;
 }
 
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function Main() {
   try {
     const { Artist, Album, Repeat } = await prompts([
@@ -154,33 +158,40 @@ async function Main() {
     });
 
     let Limited = false;
+    let Attempt = 0;
 
-    for (let I = 0; I < Repeat && !Limited; I++) {
+    while (Attempt < Repeat && !Limited) {
       try {
         const Result = await Scrobble(Artist, Album, Tracks);
         const Accepted = Result.scrobbles && parseInt(Result.scrobbles['@attr'].accepted, 10) > 0;
-        
+
         if (Accepted) {
-          Logger.Success(`Attempt #${I + 1} completed`);
+          Logger.Success(`Attempt #${Attempt + 1} completed`);
+          Attempt++;
+          await sleep(1000);
         } else {
-          Logger.Error(`Scrobble #${I + 1} failed: ${JSON.stringify(Result)}`);
+          Logger.Error(`Scrobble #${Attempt + 1} failed: ${JSON.stringify(Result)}`);
+          await sleep(2000);
         }
       } catch (Err) {
         const ErrorMsg = Err instanceof Error ? Err.message : String(Err);
-        
-        if (ErrorMsg.includes('429') || ErrorMsg.includes('Scrobbling limit hit')) {
-          Logger.Error(ErrorMsg.includes('429') ? 
-            `Ratelimit hit at attempt #${I + 1}` : 
-            ErrorMsg);
+
+        if (ErrorMsg.includes('429')) {
+          Logger.Error(`Rate limit hit at attempt #${Attempt + 1}, retrying after delay...`);
+          await sleep(5000);
+        } else if (ErrorMsg.includes('Scrobbling limit hit') || ErrorMsg.includes('24h cooldown')) {
+          Logger.Error('Last.fm 24h scrobble limit hit, stopping further attempts');
           Limited = true;
         } else {
-          Logger.Error(`Scrobble #${I + 1} error: ${ErrorMsg}`);
+          Logger.Error(`Scrobble #${Attempt + 1} error: ${ErrorMsg}`);
+          Attempt++;
+          await sleep(2000);
         }
       }
     }
 
-    Logger.Info(Limited ? 'Scrobbling stopped due to ratelimits' : 'Scrobbling done');
-    
+    Logger.Info(Limited ? 'Scrobbling stopped due to last.fm daily limit' : 'Scrobbling done');
+
   } catch (Err) {
     Logger.Error(Err instanceof Error ? Err.message : String(Err));
   }
